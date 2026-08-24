@@ -1,0 +1,283 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;900&family=Source+Code+Pro:wght@700&display=swap');
+
+:root {
+    --bg-dark: #05060A;
+    --panel-bg: rgba(20, 25, 45, 0.5);
+    --panel-border: rgba(100, 150, 255, 0.15);
+    --text-main: #FFFFFF;
+    --text-muted: #8B9BB4;
+    
+    --player-a: #00E5FF; /* Neon Cyan */
+    --player-b: #FF0055; /* Neon Magenta */
+    --bomb-color: #FFDF00; /* Electric Gold */
+    --wall-color: rgba(30, 45, 80, 0.7);
+    --floor-color: rgba(10, 15, 30, 0.3);
+    
+    --glow-a: 0 0 15px rgba(0, 229, 255, 0.6), 0 0 30px rgba(0, 229, 255, 0.4);
+    --glow-b: 0 0 15px rgba(255, 0, 85, 0.6), 0 0 30px rgba(255, 0, 85, 0.4);
+    --glow-bomb: 0 0 20px rgba(255, 223, 0, 0.8), inset 0 0 12px rgba(255, 223, 0, 0.6);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: 'Outfit', sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    overflow: hidden;
+}
+
+#root {
+    width: 100%; height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Ambient Animated Background */
+.ambient-background {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    z-index: -1;
+    overflow: hidden;
+    background: radial-gradient(circle at center, #0B0E14 0%, var(--bg-dark) 100%);
+}
+
+.glow-orb {
+    position: absolute;
+    width: 50vw; height: 50vw;
+    border-radius: 50%;
+    filter: blur(120px);
+    opacity: 0.15;
+    animation: float 20s infinite alternate cubic-bezier(0.5, 0, 0.5, 1);
+}
+
+.orb-a { background: var(--player-a); top: -10%; left: -10%; }
+.orb-b { background: var(--player-b); bottom: -10%; right: -10%; animation-delay: -10s; }
+
+@keyframes float {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(10vw, 10vh) scale(1.2); }
+}
+
+/* Main Layout */
+#game-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    z-index: 10;
+}
+
+header { text-align: center; }
+
+h1.glitch-text {
+    font-size: 3rem;
+    font-weight: 900;
+    letter-spacing: 4px;
+    margin-bottom: 8px;
+    color: var(--text-main);
+    text-shadow: 0 0 10px rgba(255,255,255,0.3);
+}
+
+.subtitle {
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    font-weight: 300;
+}
+
+/* Glassmorphism panels */
+.glass-panel {
+    background: var(--panel-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* HUD System */
+#hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: stretch;
+    width: 600px; 
+    padding: 16px 20px;
+}
+
+.score-card {
+    display: flex;
+    flex-direction: column;
+    width: 140px;
+    transition: all 0.3s ease;
+    opacity: 0.5; /* Dimmed if not active */
+}
+
+.score-card.active-card {
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+.text-right { text-align: right; }
+
+.controls-label {
+    font-family: 'Source Code Pro', monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    letter-spacing: 1px;
+}
+
+.player-name {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin: 4px 0;
+}
+
+.player-a-theme .player-name { color: var(--player-a); text-shadow: 0 0 10px rgba(0,229,255,0.4); }
+.player-b-theme .player-name { color: var(--player-b); text-shadow: 0 0 10px rgba(255,0,85,0.4); }
+
+.score-val {
+    font-size: 2rem;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.center-hud {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding: 0 20px;
+}
+
+#phase-badge {
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: 4px 12px;
+    border-radius: 100px;
+    margin-bottom: 8px;
+    transition: all 0.2s ease;
+}
+
+#timer-display {
+    font-family: 'Source Code Pro', monospace;
+    font-size: 2rem;
+    font-weight: 900;
+    margin-bottom: 8px;
+    font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+    width: 100%;
+    height: 8px;
+    background: rgba(0,0,0,0.5);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+#timer-bar {
+    height: 100%;
+    transform-origin: left;
+    transition: width 0.1s linear, background-color 0.3s ease;
+}
+
+/* Board Area */
+.board-wrapper {
+    position: relative;
+    padding: 12px;
+}
+
+#game-board {
+    display: grid;
+    grid-template-columns: repeat(15, 34px);
+    grid-template-rows: repeat(15, 34px);
+    width: calc(15 * 34px);
+    background-color: var(--bg-dark);
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+}
+
+.tile-wall {
+    background-color: var(--wall-color);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+}
+
+.tile-floor {
+    background-color: var(--floor-color);
+}
+
+/* Entities */
+.player {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 26px; height: 26px;
+    margin: 4px; 
+    border-radius: 6px;
+    z-index: 10;
+    display: flex; justify-content: center; align-items: center;
+    font-weight: 800; font-size: 0.9rem;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+}
+
+#player-a { background-color: var(--player-a); color: #000; }
+#player-b { background-color: var(--player-b); color: #fff; }
+
+.player.active { z-index: 15; }
+#player-a.active { box-shadow: var(--glow-a); }
+#player-b.active { box-shadow: var(--glow-b); }
+
+/* The Bomb */
+.bomb {
+    border: 3px solid #FFF;
+    background-color: var(--bomb-color) !important;
+    color: #000 !important;
+    animation: bombPulse 0.4s infinite alternate;
+    z-index: 20 !important;
+}
+
+@keyframes bombPulse {
+    from { box-shadow: var(--glow-bomb), 0 0 0 0px rgba(255, 223, 0, 0.4); }
+    to   { box-shadow: var(--glow-bomb), 0 0 0 8px rgba(255, 223, 0, 0); }
+}
+
+/* End Game Overlay */
+#game-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(4px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    border-radius: 8px;
+    z-index: 50;
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+
+#game-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#overlay-title {
+    font-size: 3rem;
+    font-weight: 900;
+    color: #FFF;
+    text-shadow: 0 0 20px rgba(255,255,255,0.5);
+    margin-bottom: 8px;
+}
+
+#overlay-subtitle {
+    font-size: 1.2rem;
+    color: var(--text-muted);
+}
