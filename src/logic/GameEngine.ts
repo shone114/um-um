@@ -1,4 +1,4 @@
-import { generateValidMaze, evaluateMazeMetrics, MAZE_WIDTH, MAZE_HEIGHT } from './maze';
+import { generateValidMaze, evaluateMazeMetrics, MAZE_WIDTH, MAZE_HEIGHT, latestGenerationStats } from './maze';
 import type { Point, MazeMetrics } from './maze';
 
 export type GamePhase = "COUNTDOWN" | "PLAYING" | "ROUND_OVER";
@@ -9,7 +9,17 @@ export interface TurnTelemetry {
     timestamp: string;
     event_type: 'GAMEPLAY_TURN' | 'BENCHMARK';
     turn_number: number;
+    cycle_number: number;
+    active_player: string;
+    starting_player: string;
+    timer_stage: number;
     timer_duration_seconds: number;
+    braid_strategy: string;
+    bfs_evaluation_count: number;
+    generation_time_ms: number;
+    target_path_min: number;
+    target_path_max: number;
+    walls_opened: number;
     maze_seed: string;
     maze_width: number;
     maze_height: number;
@@ -27,7 +37,7 @@ export interface TurnTelemetry {
     result: 'PASS' | 'EXPLODE';
 }
 
-export const TIMER_SEQUENCE = [20, 18, 15, 12, 10, 8, 7, 6, 5, 4, 3, 2];
+export const TIMER_SEQUENCE = [20, 18, 16, 14, 12, 10, 8, 7];
 export const COUNTDOWN_SECONDS = 2; // Actually give users 2s to prepare
 export const ROUND_OVER_FREEZE_MS = 3000;
 
@@ -47,8 +57,11 @@ export class GameEngine {
     public countdownValue = COUNTDOWN_SECONDS;
     public bombExpiresAt = 0;
     public timerIndex = 0;
+    public cycleNumber = 1;
+    public startingPlayer: PlayerId = 'A';
     
     public currentMetrics: MazeMetrics | null = null;
+    public currentGenStats = { ...latestGenerationStats };
     public sessionLog: TurnTelemetry[] = [];
     public sessionId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
     public currentEventType = 'GAMEPLAY_TURN';
@@ -71,8 +84,13 @@ export class GameEngine {
     }
 
     public startRound() {
-        this.maze = generateValidMaze();
+        this.cycleNumber = 1;
+        this.timerIndex = 0;
+        this.startingPlayer = this.bombHolder;
+
+        this.maze = generateValidMaze(TIMER_SEQUENCE[this.timerIndex]);
         this.currentMetrics = evaluateMazeMetrics(this.maze);
+        this.currentGenStats = { ...latestGenerationStats };
         this.playerA = { x: 0, y: 0 };
         this.playerB = { x: MAZE_WIDTH - 1, y: MAZE_HEIGHT - 1 };
         
@@ -80,7 +98,6 @@ export class GameEngine {
         this.phase = "COUNTDOWN";
         this.countdownStartsAt = Date.now();
         this.countdownValue = COUNTDOWN_SECONDS;
-        this.timerIndex = 0;
     }
 
     public handleInput(player: PlayerId, dx: number, dy: number) {
@@ -119,7 +136,17 @@ export class GameEngine {
             timestamp: new Date().toISOString(),
             event_type: this.currentEventType as ('GAMEPLAY_TURN'|'BENCHMARK'),
             turn_number: this.turnNumber,
+            cycle_number: this.cycleNumber,
+            active_player: this.activePlayer,
+            starting_player: this.startingPlayer,
+            timer_stage: TIMER_SEQUENCE[this.timerIndex],
             timer_duration_seconds: TIMER_SEQUENCE[this.timerIndex],
+            braid_strategy: this.currentGenStats.strategy,
+            bfs_evaluation_count: this.currentGenStats.bfsCalls,
+            generation_time_ms: this.currentGenStats.timeMs,
+            target_path_min: this.currentGenStats.targetMin,
+            target_path_max: this.currentGenStats.targetMax,
+            walls_opened: this.currentGenStats.wallsRemoved,
             maze_seed: "math-random", // Current generation lacks hard seed logic, using placeholder
             maze_width: MAZE_WIDTH,
             maze_height: MAZE_HEIGHT,
@@ -150,13 +177,22 @@ export class GameEngine {
         
         this.currentEventType = 'GAMEPLAY_TURN';
         this.bombHolder = this.bombHolder === 'A' ? 'B' : 'A';
-        this.maze = generateValidMaze();
+
+        // Two-Pass Cycle Timer Decay Evaluation
+        if (this.bombHolder === this.startingPlayer) {
+            this.cycleNumber++;
+            this.timerIndex = Math.min(this.timerIndex + 1, TIMER_SEQUENCE.length - 1);
+        }
+
+        const nextTimer = TIMER_SEQUENCE[this.timerIndex];
+        this.maze = generateValidMaze(nextTimer);
         this.currentMetrics = evaluateMazeMetrics(this.maze);
+        this.currentGenStats = { ...latestGenerationStats };
+
         this.playerA = { x: 0, y: 0 };
         this.playerB = { x: MAZE_WIDTH - 1, y: MAZE_HEIGHT - 1 };
         this.activePlayer = this.bombHolder;
-        this.timerIndex = Math.min(this.timerIndex + 1, TIMER_SEQUENCE.length - 1);
-        this.bombExpiresAt = Date.now() + (TIMER_SEQUENCE[this.timerIndex] * 1000);
+        this.bombExpiresAt = Date.now() + (nextTimer * 1000);
         
         this.turnNumber++;
         this.currentTurnValidMoves = 0;

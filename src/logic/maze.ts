@@ -222,22 +222,187 @@ export function evaluateMazeMetrics(grid: number[][]): MazeMetrics | null {
     };
 }
 
-export function generateValidMaze(): number[][] {
-    while (true) {
-        const maze = generateRawMaze();
-        const metrics = evaluateMazeMetrics(maze);
-        
-        if (metrics) {
-            // Apply Fair Constraints Rejection
-            if (
-                metrics.pathLength >= DIFFICULTY_CONFIG.MIN_PATH_LENGTH &&
-                metrics.pathLength <= DIFFICULTY_CONFIG.MAX_PATH_LENGTH &&
-                metrics.turns >= DIFFICULTY_CONFIG.MIN_TURNS &&
-                metrics.boundaryRatio <= DIFFICULTY_CONFIG.MAX_BOUNDARY_RATIO &&
-                metrics.deadEnds <= DIFFICULTY_CONFIG.MAX_DEAD_ENDS
-            ) {
-                return maze;
+export interface TargetRange {
+    min: number;
+    max: number;
+}
+export const TARGETS: Record<number, TargetRange> = {
+    20: { min: 65, max: 80 },
+    18: { min: 60, max: 75 },
+    16: { min: 50, max: 65 },
+    14: { min: 45, max: 55 },
+    12: { min: 40, max: 48 },
+    10: { min: 34, max: 42 },
+    8: {  min: 30, max: 38 },
+    7: {  min: 28, max: 35 },
+    6: {  min: 28, max: 35 },
+    5: {  min: 28, max: 35 },
+    4: {  min: 28, max: 35 },
+    3: {  min: 28, max: 35 },
+    2: {  min: 28, max: 35 }
+};
+
+export interface ModificationCandidate {
+    point: Point;
+    newMetrics: MazeMetrics;
+    pathReduction: number;
+}
+
+export function creates2x2Blob(grid: number[][], x: number, y: number): boolean {
+    grid[y][x] = 0; // Temporarily open
+    let isBlob = false;
+    for (let by = y - 1; by <= y; by++) {
+        for (let bx = x - 1; bx <= x; bx++) {
+            if (by >= 0 && by < MAZE_HEIGHT - 1 && bx >= 0 && bx < MAZE_WIDTH - 1) {
+                if (grid[by][bx] === 0 && grid[by][bx + 1] === 0 && grid[by + 1][bx] === 0 && grid[by + 1][bx + 1] === 0) {
+                    isBlob = true;
+                }
             }
         }
     }
+    grid[y][x] = 1; // Restore
+    return isBlob;
+}
+
+export function getCandidateWalls(grid: number[][]): Point[] {
+    const candidates: Point[] = [];
+    for (let y = 1; y < MAZE_HEIGHT - 1; y++) {
+        for (let x = 1; x < MAZE_WIDTH - 1; x++) {
+            if (grid[y][x] === 1) {
+                let adjPaths = 0;
+                if (grid[y - 1][x] === 0) adjPaths++;
+                if (grid[y + 1][x] === 0) adjPaths++;
+                if (grid[y][x - 1] === 0) adjPaths++;
+                if (grid[y][x + 1] === 0) adjPaths++;
+                if (adjPaths >= 2) {
+                    if (!creates2x2Blob(grid, x, y)) {
+                        candidates.push({ x, y });
+                    }
+                }
+            }
+        }
+    }
+    return candidates;
+}
+
+export function evaluateCandidates(grid: number[][], candidates: Point[], currentLength: number): ModificationCandidate[] {
+    const results: ModificationCandidate[] = [];
+    const start = { x: 0, y: 0 };
+    const end = { x: MAZE_WIDTH - 1, y: MAZE_HEIGHT - 1 };
+    
+    for (const c of candidates) {
+        grid[c.y][c.x] = 0; // Mock remove
+        const path = getShortestPathCoords(grid, start, end);
+        if (path) {
+            const newLen = path.length;
+            if (newLen < currentLength) {
+                results.push({
+                    point: c,
+                    pathReduction: currentLength - newLen,
+                    newMetrics: {
+                        pathLength: newLen,
+                        turns: calculateTurns(path),
+                        boundaryRatio: calculateBoundaryRatio(path),
+                        junctions: countJunctions(grid, path),
+                        deadEnds: countDeadEnds(grid)
+                    }
+                });
+            }
+        }
+        grid[c.y][c.x] = 1; // Rollback
+    }
+    return results;
+}
+
+export interface GenerationStats {
+    timeMs: number;
+    bfsCalls: number;
+    wallsRemoved: number;
+    strategy: string;
+    targetMin: number;
+    targetMax: number;
+}
+
+export const latestGenerationStats: GenerationStats = {
+    timeMs: 0,
+    bfsCalls: 0,
+    wallsRemoved: 0,
+    strategy: 'N/A',
+    targetMin: 0,
+    targetMax: 0
+};
+
+export function generateValidMaze(timerSeconds: number = 20): number[][] {
+    const startTime = performance.now();
+    let totalBfs = 0;
+    const targetRange = TARGETS[timerSeconds] || { min: 28, max: 80 };
+    let safetyCounter = 0;
+    
+    while (safetyCounter < 20) {
+        safetyCounter++;
+        let grid = generateRawMaze();
+        let currentMetrics = evaluateMazeMetrics(grid);
+        if (!currentMetrics) continue;
+        
+        // If already perfect
+        if (currentMetrics.pathLength >= targetRange.min && currentMetrics.pathLength <= targetRange.max) {
+            return grid;
+        }
+        
+        // If naturally too short, we must generate a new one
+        if (currentMetrics.pathLength < targetRange.min) {
+            continue; 
+        }
+
+        // Apply Targeted Controlled Braiding
+        const availableCandidates = getCandidateWalls(grid);
+        const maxBudget = Math.floor(availableCandidates.length * 0.15); // Max 15% walls removed
+        let wallsRemoved = 0;
+        let currentLength = currentMetrics.pathLength;
+
+        while (wallsRemoved < maxBudget && currentLength > targetRange.max) {
+            const cands = getCandidateWalls(grid);
+            if (cands.length === 0) break;
+
+            const evals = evaluateCandidates(grid, cands, currentLength);
+            totalBfs += cands.length;
+            if (evals.length === 0) break; // no useful reductions found
+
+            // Reject extreme overshoots (-3 lenience)
+            const safeEvals = evals.filter(e => e.newMetrics.pathLength >= targetRange.min - 3);
+            const validEvals = safeEvals.length > 0 ? safeEvals : evals;
+
+            // Strategy D: Weighted (Aim for target center)
+            const chosen = validEvals.reduce((prev, curr) => {
+                const targetCenter = (targetRange.min + targetRange.max) / 2;
+                const p1 = Math.abs(targetCenter - prev.newMetrics.pathLength);
+                const p2 = Math.abs(targetCenter - curr.newMetrics.pathLength);
+                return p1 < p2 ? prev : curr;
+            });
+
+            // Permanently remove
+            grid[chosen.point.y][chosen.point.x] = 0;
+            wallsRemoved++;
+            currentLength = chosen.newMetrics.pathLength;
+        }
+
+        if (currentLength >= targetRange.min && currentLength <= targetRange.max) {
+            latestGenerationStats.timeMs = performance.now() - startTime;
+            latestGenerationStats.bfsCalls = totalBfs;
+            latestGenerationStats.wallsRemoved = wallsRemoved;
+            latestGenerationStats.strategy = 'D';
+            latestGenerationStats.targetMin = targetRange.min;
+            latestGenerationStats.targetMax = targetRange.max;
+            return grid; // We hit the envelope perfectly inside the budget
+        }
+    }
+    
+    // Ultimate Fallback - just return standard DFS
+    latestGenerationStats.timeMs = performance.now() - startTime;
+    latestGenerationStats.bfsCalls = totalBfs;
+    latestGenerationStats.wallsRemoved = -1;
+    latestGenerationStats.strategy = 'FALLBACK';
+    latestGenerationStats.targetMin = targetRange.min;
+    latestGenerationStats.targetMax = targetRange.max;
+    return generateRawMaze();
 }

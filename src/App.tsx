@@ -165,28 +165,27 @@ export default function App() {
           </div>
           
           {debugMode && (
-            <div style={{ position: 'absolute', top: 50, left: -260, height: '400px', width: '250px', background: 'rgba(0,0,0,0.85)', padding: '16px', borderRadius: '12px', border: '1px solid #444', color: '#0f0', overflowY: 'auto' }}>
+            <div style={{ position: 'absolute', top: 50, left: -280, height: '550px', width: '270px', background: 'rgba(0,0,0,0.85)', padding: '16px', borderRadius: '12px', border: '1px solid #444', color: '#0f0', overflowY: 'auto', fontSize: '0.9rem' }}>
               <div style={{ marginBottom: 12, borderBottom: '1px solid #444', paddingBottom: 8 }}>
-                <strong>[BENCHMARK] Press 'B' for grid</strong><br/>
-                <strong>[EXPORT] Press 'X' to DL JSONL</strong><br/>
-                <strong>[SUMMARY] Press 'S' for console</strong><br/>
-                TURN: {eng.turnNumber}<br/>
+                <strong>[CMD] 'B' benchmark | 'X' export</strong><br/>
+                CYCLE: {eng.cycleNumber} | TURN: {eng.turnNumber}<br/>
                 TIMER PHASE: {TIMER_SEQUENCE[eng.timerIndex]}s<br/><br/>
+                <strong>--- GENERATOR ---</strong><br/>
+                TARGET: {eng.currentGenStats?.targetMin}-{eng.currentGenStats?.targetMax} (Strat {eng.currentGenStats?.strategy})<br/>
+                WALLS REMOVED: {eng.currentGenStats?.wallsRemoved}<br/>
+                BFS LOOPS: {eng.currentGenStats?.bfsCalls} | {eng.currentGenStats?.timeMs.toFixed(1)}ms<br/><br/>
                 <strong>--- CURRENT RUN ---</strong><br/>
                 OPTIMAL PATH: {eng.currentMetrics?.pathLength || 0} moves<br/>
-                OPTIMAL TURNS: {eng.currentMetrics?.turns || 0}<br/><br/>
-                ACTUAL MOVES: {eng.currentTurnValidMoves}<br/>
-                INVALID MOVES: {eng.currentTurnInvalidMoves}<br/>
-                ELAPSED: {(elapsedPlayMs / 1000).toFixed(1)}s<br/>
-                MOVE RATE: {currentLiveRate} m/s
+                OPTIMAL TURNS: {eng.currentMetrics?.turns || 0}<br/>
+                ACTUAL MOVES: {eng.currentTurnValidMoves} ({currentLiveRate} m/s)
               </div>
               <div style={{ opacity: 0.8 }}>
                 <strong>--- SESSION LOG ---</strong>
                 {eng.sessionLog.slice(0, 8).map((log, i) => (
                   <div key={i} style={{ borderBottom: '1px dashed #333', marginTop: '4px', paddingBottom: '4px', fontSize: '0.8rem' }}>
-                    T{log.turn_number} | Obj: {log.optimal_path_length} | Act: {log.actual_moves} <br/>
+                    [C{log.cycle_number} T{log.turn_number}] {log.active_player} Obj: {log.optimal_path_length} | Act: {log.actual_moves} <br/>
                     {log.result} in {(log.elapsed_time_ms / 1000).toFixed(1)}s ({log.actual_moves_per_second.toFixed(1)} m/s)<br/>
-                    <em style={{color: '#999'}}>{log.event_type}</em>
+                    <em style={{color: '#888'}}>[{log.timer_stage}s] W:{log.walls_opened} BFS:{log.bfs_evaluation_count} t:{log.generation_time_ms.toFixed(0)}</em>
                   </div>
                 ))}
               </div>
