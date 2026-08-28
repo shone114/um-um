@@ -195,9 +195,9 @@ h1.glitch-text {
 
 #game-board {
     display: grid;
-    grid-template-columns: repeat(15, 34px);
-    grid-template-rows: repeat(15, 34px);
-    width: calc(15 * 34px);
+    grid-template-columns: repeat(15, var(--tile-size, 34px));
+    grid-template-rows: repeat(15, var(--tile-size, 34px));
+    width: calc(15 * var(--tile-size, 34px));
     background-color: var(--bg-dark);
     border-radius: 8px;
     overflow: hidden;
@@ -218,12 +218,13 @@ h1.glitch-text {
     position: absolute;
     top: 0;
     left: 0;
-    width: 26px; height: 26px;
+    width: calc(var(--tile-size, 34px) - 8px); 
+    height: calc(var(--tile-size, 34px) - 8px);
     margin: 4px; 
     border-radius: 6px;
     z-index: 10;
     display: flex; justify-content: center; align-items: center;
-    font-weight: 800; font-size: 0.9rem;
+    font-weight: 800; font-size: calc(var(--tile-size, 34px) * 0.45);
     box-shadow: 0 4px 10px rgba(0,0,0,0.5);
 }
 
