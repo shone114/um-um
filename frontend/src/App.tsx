@@ -203,7 +203,7 @@ export default function App() {
   // ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+      if ([' '].includes(e.key)) e.preventDefault();
       const key = e.key.toLowerCase();
       if (!keysDown.current.has(key)) {
         keysDown.current.add(key);
@@ -227,16 +227,11 @@ export default function App() {
         const keys = keysDown.current;
         let dir = '';
         const slot = mySlotRef.current;
-        if (slot === 'A') {
+        if (slot === 'A' || slot === 'B') {
           if (keys.has('w')) dir = 'up';
           else if (keys.has('s')) dir = 'down';
           else if (keys.has('a')) dir = 'left';
           else if (keys.has('d')) dir = 'right';
-        } else if (slot === 'B') {
-          if (keys.has('arrowup')) dir = 'up';
-          else if (keys.has('arrowdown')) dir = 'down';
-          else if (keys.has('arrowleft')) dir = 'left';
-          else if (keys.has('arrowright')) dir = 'right';
         }
         if (dir) { sendMove(dir); nextMoveTimeRef.current = now + REPEAT_DELAY; }
       }
@@ -330,7 +325,7 @@ export default function App() {
 
           <div className={`score-card player-b-theme text-right ${gameState.active_player === 'B' ? 'active-card' : ''}`}>
             <div className="controls-label">PLAYER 2</div>
-            <div className="player-name">{mySlotDisplay === 'B' ? 'YOU (ARROWS)' : 'PLAYER 2'}</div>
+            <div className="player-name">{mySlotDisplay === 'B' ? 'YOU (WASD)' : 'PLAYER 2'}</div>
             <div className="score-val">{gameState.score_b}</div>
           </div>
         </div>
@@ -373,16 +368,10 @@ export default function App() {
 }
 
 function keyToDirection(key: string, slot: 'A' | 'B' | null): string {
-  if (slot === 'A') {
-    if (key === 'w') return 'up';
-    if (key === 's') return 'down';
-    if (key === 'a') return 'left';
-    if (key === 'd') return 'right';
-  } else if (slot === 'B') {
-    if (key === 'arrowup') return 'up';
-    if (key === 'arrowdown') return 'down';
-    if (key === 'arrowleft') return 'left';
-    if (key === 'arrowright') return 'right';
-  }
+  if (!slot) return '';
+  if (key === 'w') return 'up';
+  if (key === 's') return 'down';
+  if (key === 'a') return 'left';
+  if (key === 'd') return 'right';
   return '';
 }
