@@ -5,10 +5,10 @@ const DEFAULT_TILE_SIZE = 34;
 const WS_URL = 'wss://um-um-production.up.railway.app/ws';
 
 function generateSessionId() {
-  if (!localStorage.getItem('hot_potato_session')) {
-    localStorage.setItem('hot_potato_session', crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2));
+  if (!sessionStorage.getItem('hot_potato_session')) {
+    sessionStorage.setItem('hot_potato_session', crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2));
   }
-  return localStorage.getItem('hot_potato_session')!;
+  return sessionStorage.getItem('hot_potato_session')!;
 }
 
 export default function App() {
