@@ -12,7 +12,7 @@ async def init_db():
         return
     try:
         from psycopg_pool import AsyncConnectionPool
-        pool = AsyncConnectionPool(conninfo=db_url, min_size=1, max_size=5)
+        pool = AsyncConnectionPool(conninfo=db_url, min_size=1, max_size=5, open=False)
         await pool.open()
         logger.info("Successfully connected to Supabase Postgres pool.")
         

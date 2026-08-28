@@ -156,6 +156,8 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 data = json.loads(message)
                 await handle_message(websocket, data)
+            except WebSocketDisconnect:
+                raise
             except Exception as e:
                 logger.error(f"Error handling message: {e}\n{traceback.format_exc()}")
     except WebSocketDisconnect:
