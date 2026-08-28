@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Secrets
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
