@@ -1,175 +1,275 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './index.css';
 
 const DEFAULT_TILE_SIZE = 34;
 const WS_URL = 'wss://um-um-production.up.railway.app/ws';
+const INITIAL_DELAY = 140;
+const REPEAT_DELAY = 105;
 
-function generateSessionId() {
-  if (!sessionStorage.getItem('hot_potato_session')) {
-    sessionStorage.setItem('hot_potato_session', crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2));
+// sessionStorage: unique per-tab, persists across refresh within same tab
+function getSessionId() {
+  let id = sessionStorage.getItem('hot_potato_session');
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2));
+    sessionStorage.setItem('hot_potato_session', id);
   }
-  return sessionStorage.getItem('hot_potato_session')!;
+  return id;
 }
 
+const SESSION_ID = getSessionId(); // stable, never changes
+
 export default function App() {
-  const [session_id] = useState(generateSessionId());
   const ws = useRef<WebSocket | null>(null);
   const [gameState, setGameState] = useState<any>(null);
-  const [mySlot, setMySlot] = useState<'A' | 'B' | null>(null);
+
+  // Use ref for slot — doesn't trigger reconnect effects
+  const mySlotRef = useRef<'A' | 'B' | null>(null);
+  const [mySlotDisplay, setMySlotDisplay] = useState<'A' | 'B' | null>(null);
+
   const [joinCodeInp, setJoinCodeInp] = useState('');
-
   const [tileSize, setTileSize] = useState(DEFAULT_TILE_SIZE);
-  const keysDown = useRef<Set<string>>(new Set());
-  const nextMoveTimeRef = useRef<number>(0);
-  const INITIAL_DELAY = 140;
-  const REPEAT_DELAY = 105;
-
   const [tick, setTick] = useState(Date.now());
 
+  // Client-side prediction: local player positions (moves ahead of server)
+  const localPosRef = useRef<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
+  const [localPos, setLocalPos] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
+
+  const keysDown = useRef<Set<string>>(new Set());
+  const nextMoveTimeRef = useRef<number>(0);
+
+  // Room code ref — read by WS handlers without closing over stale state
+  const roomCodeRef = useRef<string | null>(null);
+  const gameStateRef = useRef<any>(null);
+  gameStateRef.current = gameState;
+
+  // ──────────────────────────────────────────────────────────────
+  // RESIZE
+  // ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const handleResize = () => {
-      const availableHeight = window.innerHeight - 280;
-      const availableWidth = window.innerWidth - 40;
-      const targetSize = Math.max(16, Math.min(70, Math.floor(Math.min(availableHeight, availableWidth) / 15)));
-      setTileSize(targetSize);
+      const avH = window.innerHeight - 280;
+      const avW = window.innerWidth - 40;
+      setTileSize(Math.max(16, Math.min(70, Math.floor(Math.min(avH, avW) / 15))));
     };
     window.addEventListener('resize', handleResize);
     handleResize();
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // ──────────────────────────────────────────────────────────────
+  // TICKER (for live timer countdown)
+  // ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    let reconnectTimeout: any;
-    const connect = () => {
-      console.log('Connecting to', WS_URL);
+    let h: number;
+    const loop = () => { setTick(Date.now()); h = requestAnimationFrame(loop); };
+    h = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(h);
+  }, []);
+
+  // ──────────────────────────────────────────────────────────────
+  // WEBSOCKET — stable, never reconnects due to state changes
+  // ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    let reconnectTimer: any;
+    let active = true;
+
+    function connect() {
+      if (!active) return;
       const socket = new WebSocket(WS_URL);
+
       socket.onopen = () => {
+        if (!active) { socket.close(); return; }
         ws.current = socket;
-        // Auto-rejoin if we already have a state
-        if (gameState?.room_code) {
-          socket.send(JSON.stringify({ type: 'join', session_id, room_code: gameState.room_code }));
+        console.log('[WS] Connected');
+        // Auto-rejoin on reconnect IF we already had a room
+        if (roomCodeRef.current && mySlotRef.current !== null) {
+          socket.send(JSON.stringify({ type: 'join', session_id: SESSION_ID, room_code: roomCodeRef.current }));
         }
       };
+
       socket.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
-          if (msg.type === 'room_joined') {
-            setMySlot(msg.payload.slot);
-          } else if (msg.type === 'state_sync') {
-            setGameState(msg.payload);
-          } else if (msg.type === 'player_moved') {
-            setGameState((prev: any) => {
-              if (!prev) return prev;
-              const upd = { ...prev };
-              if (msg.player === 'A') upd.player_a = msg.pos;
-              if (msg.player === 'B') upd.player_b = msg.pos;
-              return upd;
-            });
-          }
+          handleServerMessage(msg);
         } catch (err) {
-          console.error('WS Parse Error', err);
+          console.error('[WS] parse error', err);
         }
       };
+
       socket.onclose = () => {
         ws.current = null;
-        reconnectTimeout = setTimeout(connect, 2000);
+        if (active) reconnectTimer = setTimeout(connect, 2000);
       };
-    };
+
+      socket.onerror = () => socket.close();
+    }
+
     connect();
-    return () => { clearTimeout(reconnectTimeout); ws.current?.close(); };
-  }, [session_id, gameState?.room_code]); // Added dependency to allow auto-rejoin on hot reload
-
-  useEffect(() => {
-    let handle: number;
-    const loop = () => {
-      setTick(Date.now());
-      handle = requestAnimationFrame(loop);
+    return () => {
+      active = false;
+      clearTimeout(reconnectTimer);
+      ws.current?.close();
+      ws.current = null;
     };
-    handle = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(handle);
-  }, []);
+  }, []); // ← empty deps: WS lifecycle is completely isolated from React state
 
-  useEffect(() => {
-    let handle: number;
-    const loop = () => {
-      const now = Date.now();
-      const keys = keysDown.current;
-
-      if (ws.current && ws.current.readyState === WebSocket.OPEN && gameState && gameState.phase === 'PLAYING') {
-        if (now >= nextMoveTimeRef.current) {
-          let direction = '';
-          if (mySlot === 'A') {
-            if (keys.has('w')) direction = 'up';
-            else if (keys.has('s')) direction = 'down';
-            else if (keys.has('a')) direction = 'left';
-            else if (keys.has('d')) direction = 'right';
-          } else if (mySlot === 'B') {
-            if (keys.has('arrowup')) direction = 'up';
-            else if (keys.has('arrowdown')) direction = 'down';
-            else if (keys.has('arrowleft')) direction = 'left';
-            else if (keys.has('arrowright')) direction = 'right';
-          }
-          if (direction) {
-            ws.current.send(JSON.stringify({ type: 'move', session_id, room_code: gameState.room_code, payload: { direction } }));
-            nextMoveTimeRef.current = now + REPEAT_DELAY;
-          }
+  // ──────────────────────────────────────────────────────────────
+  // SERVER MESSAGE HANDLER
+  // ──────────────────────────────────────────────────────────────
+  const handleServerMessage = useCallback((msg: any) => {
+    if (msg.type === 'room_joined') {
+      const slot = msg.payload.slot as 'A' | 'B';
+      mySlotRef.current = slot;
+      setMySlotDisplay(slot);
+      roomCodeRef.current = msg.payload.room_code;
+    } else if (msg.type === 'state_sync') {
+      const payload = msg.payload;
+      setGameState(payload);
+      // On state_sync, reset local prediction to authoritative server position
+      const serverPos = { a: { ...payload.player_a }, b: { ...payload.player_b } };
+      localPosRef.current = serverPos;
+      setLocalPos(serverPos);
+    } else if (msg.type === 'player_moved') {
+      // Server confirmed a move — update only the moved player's authoritative pos
+      setGameState((prev: any) => {
+        if (!prev) return prev;
+        const upd = { ...prev };
+        if (msg.player === 'A') upd.player_a = { ...msg.pos };
+        else if (msg.player === 'B') upd.player_b = { ...msg.pos };
+        return upd;
+      });
+      // Reconcile local prediction: update the OTHER player (our own moves stay predicted)
+      if (msg.player !== mySlotRef.current) {
+        setLocalPos(prev => {
+          if (!prev) return prev;
+          const upd = { ...prev };
+          if (msg.player === 'A') upd.a = { ...msg.pos };
+          else upd.b = { ...msg.pos };
+          return upd;
+        });
+        if (localPosRef.current) {
+          const key = msg.player === 'A' ? 'a' : 'b';
+          localPosRef.current = { ...localPosRef.current, [key]: { ...msg.pos } };
         }
       }
-      handle = requestAnimationFrame(loop);
-    };
-    handle = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(handle);
-  }, [gameState, mySlot, session_id]);
+    } else if (msg.type === 'error') {
+      console.warn('[WS] server error:', msg.message);
+    }
+  }, []);
 
+  // ──────────────────────────────────────────────────────────────
+  // MOVE SENDER with CLIENT-SIDE PREDICTION
+  // ──────────────────────────────────────────────────────────────
+  const sendMove = useCallback((direction: string) => {
+    const gs = gameStateRef.current;
+    if (!gs || gs.phase !== 'PLAYING') return;
+    if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+    if (!roomCodeRef.current || mySlotRef.current === null) return;
+    if (gs.active_player !== mySlotRef.current) return;
+
+    // Client-side prediction: move locally NOW, before server confirms
+    const dx = direction === 'left' ? -1 : direction === 'right' ? 1 : 0;
+    const dy = direction === 'up' ? -1 : direction === 'down' ? 1 : 0;
+    const maze = gs.maze;
+    const slot = mySlotRef.current;
+
+    if (localPosRef.current && maze?.length) {
+      const curr = slot === 'A' ? { ...localPosRef.current.a } : { ...localPosRef.current.b };
+      const tx = curr.x + dx;
+      const ty = curr.y + dy;
+      const W = maze[0].length;
+      const H = maze.length;
+
+      if (tx >= 0 && tx < W && ty >= 0 && ty < H && maze[ty][tx] === 0) {
+        curr.x = tx; curr.y = ty;
+        const newPos = slot === 'A'
+          ? { a: curr, b: { ...localPosRef.current.b } }
+          : { a: { ...localPosRef.current.a }, b: curr };
+        localPosRef.current = newPos;
+        setLocalPos({ ...newPos });
+      }
+    }
+
+    ws.current.send(JSON.stringify({
+      type: 'move',
+      session_id: SESSION_ID,
+      room_code: roomCodeRef.current,
+      payload: { direction }
+    }));
+  }, []);
+
+  // ──────────────────────────────────────────────────────────────
+  // KEY INPUT — keydown (immediate first press) + held repeat
+  // ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
-        e.preventDefault();
-      }
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
       const key = e.key.toLowerCase();
       if (!keysDown.current.has(key)) {
         keysDown.current.add(key);
-        let direction = '';
-        if (mySlot === 'A') {
-          if (key === 'w') direction = 'up';
-          else if (key === 's') direction = 'down';
-          else if (key === 'a') direction = 'left';
-          else if (key === 'd') direction = 'right';
-        } else if (mySlot === 'B') {
-          if (key === 'arrowup') direction = 'up';
-          else if (key === 'arrowdown') direction = 'down';
-          else if (key === 'arrowleft') direction = 'left';
-          else if (key === 'arrowright') direction = 'right';
-        }
-        if (direction && ws.current?.readyState === WebSocket.OPEN && gameState?.phase === 'PLAYING') {
-          ws.current.send(JSON.stringify({ type: 'move', session_id, room_code: gameState.room_code, payload: { direction } }));
-          nextMoveTimeRef.current = Date.now() + INITIAL_DELAY;
-        }
+        // Immediate first move on press
+        const dir = keyToDirection(key, mySlotRef.current);
+        if (dir) { sendMove(dir); nextMoveTimeRef.current = Date.now() + INITIAL_DELAY; }
       }
     };
     const onKeyUp = (e: KeyboardEvent) => keysDown.current.delete(e.key.toLowerCase());
     window.addEventListener('keydown', onKeyDown, { passive: false });
     window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
-  }, [gameState, mySlot, session_id]);
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+  }, [sendMove]);
 
+  // Held-key repeat loop
+  useEffect(() => {
+    let h: number;
+    const loop = () => {
+      const now = Date.now();
+      if (now >= nextMoveTimeRef.current) {
+        const keys = keysDown.current;
+        let dir = '';
+        const slot = mySlotRef.current;
+        if (slot === 'A') {
+          if (keys.has('w')) dir = 'up';
+          else if (keys.has('s')) dir = 'down';
+          else if (keys.has('a')) dir = 'left';
+          else if (keys.has('d')) dir = 'right';
+        } else if (slot === 'B') {
+          if (keys.has('arrowup')) dir = 'up';
+          else if (keys.has('arrowdown')) dir = 'down';
+          else if (keys.has('arrowleft')) dir = 'left';
+          else if (keys.has('arrowright')) dir = 'right';
+        }
+        if (dir) { sendMove(dir); nextMoveTimeRef.current = now + REPEAT_DELAY; }
+      }
+      h = requestAnimationFrame(loop);
+    };
+    h = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(h);
+  }, [sendMove]);
+
+  // ──────────────────────────────────────────────────────────────
+  // ACTIONS
+  // ──────────────────────────────────────────────────────────────
+  const createRoom = () => ws.current?.send(JSON.stringify({ type: 'create', session_id: SESSION_ID }));
+  const joinRoom = () => {
+    if (!joinCodeInp.trim()) return;
+    ws.current?.send(JSON.stringify({ type: 'join', session_id: SESSION_ID, room_code: joinCodeInp.toUpperCase() }));
+  };
+
+  // ──────────────────────────────────────────────────────────────
+  // RENDER
+  // ──────────────────────────────────────────────────────────────
   if (!gameState) {
     return (
       <div id="game-container" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100vh', gap: 24, textAlign: 'center' }}>
-        <div className="ambient-background">
-          <div className="glow-orb orb-a"></div>
-          <div className="glow-orb orb-b"></div>
-        </div>
+        <div className="ambient-background"><div className="glow-orb orb-a" /><div className="glow-orb orb-b" /></div>
         <h1 className="glitch-text">HOT POTATO</h1>
         <p className="subtitle">Only the Bomb Holder can move. Tag to survive.</p>
         <div className="glass-panel" style={{ padding: 24, display: 'flex', gap: 12, marginTop: 40 }}>
-          <button onClick={() => ws.current?.send(JSON.stringify({ type: 'create', session_id }))} style={{ padding: '12px 24px', background: 'var(--player-a)', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 900 }}>CREATE ROOM</button>
+          <button onClick={createRoom} style={{ padding: '12px 24px', background: 'var(--player-a)', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 900 }}>CREATE ROOM</button>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input type="text" placeholder="ROOM CODE" value={joinCodeInp} onChange={e => setJoinCodeInp(e.target.value.toUpperCase())} maxLength={5} style={{ padding: '12px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--panel-border)', color: '#fff', borderRadius: 8, width: 120, textTransform: 'uppercase' }} />
-            <button onClick={() => ws.current?.send(JSON.stringify({ type: 'join', session_id, room_code: joinCodeInp }))} style={{ padding: '12px 24px', background: 'var(--player-b)', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 900, color: '#fff' }}>JOIN</button>
+            <input type="text" placeholder="ROOM CODE" value={joinCodeInp} onChange={e => setJoinCodeInp(e.target.value.toUpperCase())} maxLength={5}
+              style={{ padding: '12px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--panel-border)', color: '#fff', borderRadius: 8, width: 120, textTransform: 'uppercase' }} />
+            <button onClick={joinRoom} style={{ padding: '12px 24px', background: 'var(--player-b)', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 900, color: '#fff' }}>JOIN</button>
           </div>
         </div>
       </div>
@@ -179,33 +279,28 @@ export default function App() {
   const isPlaying = gameState.phase === 'PLAYING';
   const remainingBomb = Math.max(0, gameState.bomb_deadline_ms - tick);
   const remainingCount = Math.max(0, gameState.countdown_deadline_ms - tick);
-
   const currentDuration = (gameState.timer_duration_s || 20) * 1000;
   const pct = gameState.phase === 'WAITING' ? 100 : (remainingBomb / currentDuration) * 100;
 
-  const getPhaseStyles = () => {
+  // Use client-predicted positions for the active player, server positions for the opponent
+  const displayA = (mySlotDisplay === 'A' && localPos) ? localPos.a : gameState.player_a;
+  const displayB = (mySlotDisplay === 'B' && localPos) ? localPos.b : gameState.player_b;
+
+  const hudConfig = (() => {
     switch (gameState.phase) {
-      case 'WAITING': return { text: `ROOM: ${gameState.room_code} (WAITING FOR P2)`, color: "#777", bg: "rgba(0,0,0,0.5)", timerDisplay: "WAITING" };
-      case 'COUNTDOWN': return { text: "PREPARE", color: "#FFD700", bg: "rgba(255,215,0,0.15)", timerDisplay: (remainingCount / 1000).toFixed(1) + "s" };
-      case 'PLAYING': return { text: "RUN!", color: "#00FF7F", bg: "rgba(0,255,127,0.15)", timerDisplay: (remainingBomb / 1000).toFixed(1) + "s" };
-      case 'ROUND_OVER': return { text: "ELIMINATED", color: "#FF0055", bg: "rgba(255,0,85,0.15)", timerDisplay: "0.0s" };
-      default: return { text: gameState.phase, color: "#fff", bg: "#000", timerDisplay: "" };
+      case 'WAITING': return { text: `ROOM: ${gameState.room_code} — WAITING P2`, color: '#777', bg: 'rgba(0,0,0,0.5)', timerDisplay: 'WAITING' };
+      case 'COUNTDOWN': return { text: 'PREPARE', color: '#FFD700', bg: 'rgba(255,215,0,0.15)', timerDisplay: (remainingCount / 1000).toFixed(1) + 's' };
+      case 'PLAYING': return { text: 'RUN!', color: '#00FF7F', bg: 'rgba(0,255,127,0.15)', timerDisplay: (remainingBomb / 1000).toFixed(1) + 's' };
+      case 'ROUND_OVER': return { text: 'ELIMINATED', color: '#FF0055', bg: 'rgba(255,0,85,0.15)', timerDisplay: '0.0s' };
+      default: return { text: gameState.phase, color: '#fff', bg: '#000', timerDisplay: '' };
     }
-  };
+  })();
 
-  const hudConfig = getPhaseStyles();
   const dangerTimer = isPlaying && remainingBomb <= 5000;
-
-  const transitionStyleA = (!isPlaying) ? 'none' : 'transform 0.09s linear';
-  const transitionStyleB = (!isPlaying) ? 'none' : 'transform 0.09s linear';
 
   return (
     <>
-      <div className="ambient-background">
-        <div className="glow-orb orb-a"></div>
-        <div className="glow-orb orb-b"></div>
-      </div>
-
+      <div className="ambient-background"><div className="glow-orb orb-a" /><div className="glow-orb orb-b" /></div>
       <div id="game-container" style={{ '--tile-size': `${tileSize}px` } as React.CSSProperties}>
         <header>
           <h1 className="glitch-text">HOT POTATO</h1>
@@ -215,14 +310,12 @@ export default function App() {
         <div id="hud" className="glass-panel">
           <div className={`score-card player-a-theme ${gameState.active_player === 'A' ? 'active-card' : ''}`}>
             <div className="controls-label">PLAYER 1</div>
-            <div className="player-name">{mySlot === 'A' ? 'YOU (WASD)' : 'PLAYER 1'}</div>
+            <div className="player-name">{mySlotDisplay === 'A' ? 'YOU (WASD)' : 'PLAYER 1'}</div>
             <div className="score-val">{gameState.score_a}</div>
           </div>
 
           <div className="center-hud">
-            <div id="phase-badge" style={{ color: hudConfig.color, background: hudConfig.bg }}>
-              {hudConfig.text}
-            </div>
+            <div id="phase-badge" style={{ color: hudConfig.color, background: hudConfig.bg }}>{hudConfig.text}</div>
             <div id="timer-display" style={{ color: dangerTimer ? '#FF0055' : (gameState.phase === 'COUNTDOWN' || gameState.phase === 'ROUND_OVER' ? 'inherit' : 'var(--bomb-color)') }}>
               {hudConfig.timerDisplay}
             </div>
@@ -231,13 +324,13 @@ export default function App() {
                 width: gameState.phase === 'COUNTDOWN' ? '100%' : gameState.phase === 'ROUND_OVER' ? '0%' : `${pct}%`,
                 background: dangerTimer ? '#FF0055' : (gameState.phase === 'COUNTDOWN' ? 'var(--text-muted)' : 'var(--bomb-color)'),
                 boxShadow: dangerTimer ? '0 0 15px #FF0055' : (gameState.phase === 'COUNTDOWN' ? 'none' : '0 0 10px var(--bomb-color)')
-              }}></div>
+              }} />
             </div>
           </div>
 
           <div className={`score-card player-b-theme text-right ${gameState.active_player === 'B' ? 'active-card' : ''}`}>
             <div className="controls-label">PLAYER 2</div>
-            <div className="player-name">{mySlot === 'B' ? 'YOU (ARROWS)' : 'PLAYER 2'}</div>
+            <div className="player-name">{mySlotDisplay === 'B' ? 'YOU (ARROWS)' : 'PLAYER 2'}</div>
             <div className="score-val">{gameState.score_b}</div>
           </div>
         </div>
@@ -247,21 +340,19 @@ export default function App() {
             <div id="game-board">
               {gameState.maze.map((row: number[], y: number) =>
                 row.map((cell: number, x: number) => (
-                  <div key={`${x}-${y}`} className={cell === 1 ? "tile-wall" : "tile-floor"} style={{ gridColumn: x + 1, gridRow: y + 1 }} />
+                  <div key={`${x}-${y}`} className={cell === 1 ? 'tile-wall' : 'tile-floor'} style={{ gridColumn: x + 1, gridRow: y + 1 }} />
                 ))
               )}
 
-              {/* Player A */}
               <div id="player-a"
                 className={`player ${gameState.bomb_holder === 'A' ? 'bomb' : ''} ${gameState.active_player === 'A' && isPlaying ? 'active' : ''}`}
-                style={{ transform: `translate(${gameState.player_a.x * tileSize}px, ${gameState.player_a.y * tileSize}px)`, transition: transitionStyleA }}>
+                style={{ transform: `translate(${displayA.x * tileSize}px, ${displayA.y * tileSize}px)`, transition: isPlaying ? 'transform 0.07s linear' : 'none' }}>
                 A
               </div>
 
-              {/* Player B */}
               <div id="player-b"
                 className={`player ${gameState.bomb_holder === 'B' ? 'bomb' : ''} ${gameState.active_player === 'B' && isPlaying ? 'active' : ''}`}
-                style={{ transform: `translate(${gameState.player_b.x * tileSize}px, ${gameState.player_b.y * tileSize}px)`, transition: transitionStyleB }}>
+                style={{ transform: `translate(${displayB.x * tileSize}px, ${displayB.y * tileSize}px)`, transition: isPlaying ? 'transform 0.07s linear' : 'none' }}>
                 B
               </div>
             </div>
@@ -279,4 +370,19 @@ export default function App() {
       </div>
     </>
   );
+}
+
+function keyToDirection(key: string, slot: 'A' | 'B' | null): string {
+  if (slot === 'A') {
+    if (key === 'w') return 'up';
+    if (key === 's') return 'down';
+    if (key === 'a') return 'left';
+    if (key === 'd') return 'right';
+  } else if (slot === 'B') {
+    if (key === 'arrowup') return 'up';
+    if (key === 'arrowdown') return 'down';
+    if (key === 'arrowleft') return 'left';
+    if (key === 'arrowright') return 'right';
+  }
+  return '';
 }
