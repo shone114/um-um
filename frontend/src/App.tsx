@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import WallTile from './WallTile';
 import './index.css';
 
 const DEFAULT_TILE_SIZE = 34;
@@ -335,7 +336,9 @@ export default function App() {
             <div id="game-board">
               {gameState.maze.map((row: number[], y: number) =>
                 row.map((cell: number, x: number) => (
-                  <div key={`${x}-${y}`} className={cell === 1 ? 'tile-wall' : 'tile-floor'} style={{ gridColumn: x + 1, gridRow: y + 1 }} />
+                  cell === 1
+                    ? <WallTile key={`${x}-${y}`} x={x} y={y} maze={gameState.maze} />
+                    : <div key={`${x}-${y}`} className="tile-floor" style={{ gridColumn: x + 1, gridRow: y + 1 }} />
                 ))
               )}
 
