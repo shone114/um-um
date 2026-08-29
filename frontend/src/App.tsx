@@ -26,8 +26,7 @@ export default function App() {
   const ws = useRef<WebSocket | null>(null);
   const [gameState, setGameState] = useState<any>(null);
   const gameContainerRef = useRef<HTMLDivElement | null>(null);
-  const headerRef = useRef<HTMLElement | null>(null);
-  const hudRef = useRef<HTMLDivElement | null>(null);
+  const boardSlotRef = useRef<HTMLDivElement | null>(null);
 
   // Use ref for slot — doesn't trigger reconnect effects
   const mySlotRef = useRef<'A' | 'B' | null>(null);
@@ -62,27 +61,21 @@ export default function App() {
     if (!hasGameState) return;
 
     const updateTileSize = () => {
-      const container = gameContainerRef.current;
-      const header = headerRef.current;
-      const hud = hudRef.current;
-      if (!container || !header || !hud) return;
+      const slot = boardSlotRef.current;
+      if (!slot) return;
 
-      const containerStyles = window.getComputedStyle(container);
-      const verticalPadding = Number.parseFloat(containerStyles.paddingTop) + Number.parseFloat(containerStyles.paddingBottom);
-      const gap = Number.parseFloat(containerStyles.rowGap || containerStyles.gap) || 0;
-      const availableWidth = container.clientWidth;
-      const occupiedHeight = header.offsetHeight + hud.offsetHeight + (gap * 2) + verticalPadding;
-      const availableHeight = window.innerHeight - occupiedHeight;
       const frameCells = 17;
+      const availableWidth = slot.clientWidth;
+      const availableHeight = slot.clientHeight;
       const nextSize = Math.floor(Math.min(70, availableWidth / frameCells, availableHeight / frameCells));
 
       setTileSize(Math.max(8, nextSize));
     };
 
     const observer = new ResizeObserver(updateTileSize);
-    observer.observe(gameContainerRef.current!);
-    observer.observe(headerRef.current!);
-    observer.observe(hudRef.current!);
+    if (boardSlotRef.current) {
+      observer.observe(boardSlotRef.current);
+    }
     window.addEventListener('resize', updateTileSize);
     updateTileSize();
 
@@ -333,12 +326,12 @@ export default function App() {
     <>
       <div className="ambient-background"><div className="glow-orb orb-a" /><div className="glow-orb orb-b" /></div>
       <div ref={gameContainerRef} id="game-container" className="game-layout" style={{ '--tile-size': `${tileSize}px` } as React.CSSProperties}>
-        <header ref={headerRef}>
+        <header>
           <h1 className="glitch-text">MIAMI MICE</h1>
           <p className="subtitle">Race through the maze and reach the cheese.</p>
         </header>
 
-        <div ref={hudRef} id="hud" className="glass-panel">
+        <div id="hud" className="glass-panel">
           <div className={`score-card player-a-theme ${gameState.active_player === 'A' ? 'active-card' : ''}`}>
             <div className="controls-label">PLAYER 1</div>
             <div className="player-name">{mySlotDisplay === 'A' ? 'YOU (WASD)' : 'PLAYER 1'}</div>
@@ -367,41 +360,47 @@ export default function App() {
         </div>
 
         {gameState.maze && gameState.maze.length > 0 && (
-          <div className="board-wrapper">
-            <div className="maze-frame">
-              <MazeBoundary />
-            <div id="game-board">
-              {gameState.maze.map((row: number[], y: number) =>
-                row.map((cell: number, x: number) => (
-                  cell === 1
-                    ? <WallTile key={`${x}-${y}`} x={x} y={y} maze={gameState.maze} />
-                    : <div key={`${x}-${y}`} className={`tile-floor floor-variant-${floorVariants[y]?.[x] ?? 0}`} style={{ gridColumn: x + 1, gridRow: y + 1 }} />
-                ))
-              )}
+          <div ref={boardSlotRef} className="board-slot">
+            <div className="board-wrapper">
+              <div className="maze-frame">
+                <MazeBoundary />
+                <div id="game-board">
+                  {gameState.maze.map((row: number[], y: number) =>
+                    row.map((cell: number, x: number) => (
+                      cell === 1
+                        ? <WallTile key={`${x}-${y}`} x={x} y={y} maze={gameState.maze} />
+                        : <div key={`${x}-${y}`} className={`tile-floor floor-variant-${floorVariants[y]?.[x] ?? 0}`} style={{ gridColumn: x + 1, gridRow: y + 1 }} />
+                    ))
+                  )}
 
-              <div id="player-a"
-                className={`player ${gameState.active_player === 'A' ? 'mouse' : 'cheese-target'}`}
-                aria-label={gameState.active_player === 'A' ? 'Player 1 mouse' : 'Player 1 cheese target'}
-                style={{ transform: `translate(${displayA.x * tileSize}px, ${displayA.y * tileSize}px)`, transition: isPlaying ? 'transform 0.07s linear' : 'none' }}>
-                {gameState.active_player === 'A' ? 'A' : ''}
-              </div>
+                  <div
+                    id="player-a"
+                    className={`player ${gameState.active_player === 'A' ? 'mouse' : 'cheese-target'}`}
+                    aria-label={gameState.active_player === 'A' ? 'Player 1 mouse' : 'Player 1 cheese target'}
+                    style={{ transform: `translate(${displayA.x * tileSize}px, ${displayA.y * tileSize}px)`, transition: isPlaying ? 'transform 0.07s linear' : 'none' }}
+                  >
+                    {gameState.active_player === 'A' ? 'A' : ''}
+                  </div>
 
-              <div id="player-b"
-                className={`player ${gameState.active_player === 'B' ? 'mouse' : 'cheese-target'}`}
-                aria-label={gameState.active_player === 'B' ? 'Player 2 mouse' : 'Player 2 cheese target'}
-                style={{ transform: `translate(${displayB.x * tileSize}px, ${displayB.y * tileSize}px)`, transition: isPlaying ? 'transform 0.07s linear' : 'none' }}>
-                {gameState.active_player === 'B' ? 'B' : ''}
-              </div>
+                  <div
+                    id="player-b"
+                    className={`player ${gameState.active_player === 'B' ? 'mouse' : 'cheese-target'}`}
+                    aria-label={gameState.active_player === 'B' ? 'Player 2 mouse' : 'Player 2 cheese target'}
+                    style={{ transform: `translate(${displayB.x * tileSize}px, ${displayB.y * tileSize}px)`, transition: isPlaying ? 'transform 0.07s linear' : 'none' }}
+                  >
+                    {gameState.active_player === 'B' ? 'B' : ''}
+                  </div>
 
-              <div id="game-overlay" className={gameState.phase === 'ROUND_OVER' ? '' : 'hidden'}>
-                <h2 id="overlay-title">CHEESE GOT AWAY!</h2>
-                <p id="overlay-subtitle">
-                  <span style={{ color: gameState.bomb_holder === 'A' ? 'var(--player-a)' : 'var(--player-b)' }}>
-                    {gameState.bomb_holder === 'A' ? 'PLAYER 1' : 'PLAYER 2'}
-                  </span> ran out of time.
-                </p>
+                  <div id="game-overlay" className={gameState.phase === 'ROUND_OVER' ? '' : 'hidden'}>
+                    <h2 id="overlay-title">CHEESE GOT AWAY!</h2>
+                    <p id="overlay-subtitle">
+                      <span style={{ color: gameState.bomb_holder === 'A' ? 'var(--player-a)' : 'var(--player-b)' }}>
+                        {gameState.bomb_holder === 'A' ? 'PLAYER 1' : 'PLAYER 2'}
+                      </span> ran out of time.
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
             </div>
           </div>
         )}

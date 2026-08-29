@@ -62,9 +62,11 @@ button { min-height: 44px; }
 .game-layout {
   display: flex;
   min-height: 100dvh;
+  height: 100dvh;
   flex-direction: column;
   align-items: center;
   gap: 16px;
+  overflow: hidden;
 }
 
 .lobby-layout {
@@ -135,23 +137,72 @@ h1.glitch-text {
 .progress-track { width: 100%; height: 8px; overflow: hidden; border-radius: 4px; background: rgba(0, 0, 0, 0.5); }
 #timer-bar { height: 100%; transform-origin: left; transition: width 0.1s linear, background-color 0.3s ease; }
 
+.board-slot {
+  display: grid;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  place-items: center;
+}
+
 .board-wrapper { display: grid; place-items: center; width: 100%; min-height: 0; }
 .maze-frame {
   position: relative;
   width: calc(17 * var(--tile-size));
   height: calc(17 * var(--tile-size));
   flex: none;
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.35);
 }
 
 .maze-boundary {
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-template-columns: repeat(17, var(--tile-size));
-  grid-template-rows: repeat(17, var(--tile-size));
   pointer-events: none;
+  z-index: 0;
 }
-.maze-boundary-tile { width: 100%; height: 100%; object-fit: fill; image-rendering: auto; }
+
+.maze-boundary-rail {
+  position: absolute;
+  background-repeat: repeat;
+  background-size: var(--tile-size) var(--tile-size);
+  image-rendering: auto;
+}
+
+.maze-boundary-top,
+.maze-boundary-bottom {
+  left: 0;
+  right: 0;
+  height: var(--tile-size);
+  background-repeat: repeat-x;
+}
+
+.maze-boundary-top {
+  top: 0;
+  background-position: 0 0;
+}
+
+.maze-boundary-bottom {
+  bottom: 0;
+  background-position: 0 100%;
+}
+
+.maze-boundary-left,
+.maze-boundary-right {
+  top: var(--tile-size);
+  bottom: var(--tile-size);
+  width: var(--tile-size);
+  background-repeat: repeat-y;
+}
+
+.maze-boundary-left {
+  left: 0;
+  background-position: 0 0;
+}
+
+.maze-boundary-right {
+  right: 0;
+  background-position: 100% 0;
+}
 
 #game-board {
   position: absolute;
@@ -163,11 +214,23 @@ h1.glitch-text {
   grid-template-rows: repeat(15, var(--tile-size));
   overflow: hidden;
   background: var(--floor-color);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), inset 0 2px 0 rgba(255, 255, 255, 0.02);
 }
 
-.tile-wall { position: relative; overflow: visible; z-index: 2; }
+.tile-wall {
+  position: relative;
+  overflow: visible;
+  z-index: 2;
+  box-shadow: inset 0 -2px 5px rgba(0, 0, 0, 0.18), inset 0 1px 1px rgba(255, 255, 255, 0.04);
+}
 .tile-wall img { display: block; width: 100%; height: 100%; image-rendering: auto; }
-.tile-floor { background-color: var(--floor-color); background-position: center; background-repeat: no-repeat; background-size: 100% 100%; }
+.tile-floor {
+  background-color: var(--floor-color);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
 .floor-variant-0 { background-image: url('/assets/maze/tile1.png'); }
 .floor-variant-1 { background-image: url('/assets/maze/tile2.png'); }
 .floor-variant-2 { background-image: url('/assets/maze/tile3.png'); }
