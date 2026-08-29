@@ -1,11 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import WallTile from './WallTile';
+import MazeBoundary from './MazeBoundary';
+import { createFloorVariantMap } from './logic/floorVariants';
 import './index.css';
 
 const DEFAULT_TILE_SIZE = 34;
 const WS_URL = 'wss://um-um-production.up.railway.app/ws';
 const INITIAL_DELAY = 140;
 const REPEAT_DELAY = 105;
+const EMPTY_MAZE: number[][] = [];
 
 // sessionStorage: unique per-tab, persists across refresh within same tab
 function getSessionId() {
@@ -22,6 +25,9 @@ const SESSION_ID = getSessionId(); // stable, never changes
 export default function App() {
   const ws = useRef<WebSocket | null>(null);
   const [gameState, setGameState] = useState<any>(null);
+  const gameContainerRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+  const hudRef = useRef<HTMLDivElement | null>(null);
 
   // Use ref for slot — doesn't trigger reconnect effects
   const mySlotRef = useRef<'A' | 'B' | null>(null);
@@ -42,20 +48,49 @@ export default function App() {
   const roomCodeRef = useRef<string | null>(null);
   const gameStateRef = useRef<any>(null);
   gameStateRef.current = gameState;
+  const maze = gameState?.maze ?? EMPTY_MAZE;
+  const hasGameState = Boolean(gameState);
+  const floorVariants = useMemo(
+    () => maze.length ? createFloorVariantMap(maze) : [],
+    [maze],
+  );
 
   // ──────────────────────────────────────────────────────────────
   // RESIZE
   // ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const handleResize = () => {
-      const avH = window.innerHeight - 280;
-      const avW = window.innerWidth - 40;
-      setTileSize(Math.max(16, Math.min(70, Math.floor(Math.min(avH, avW) / 15))));
+  useLayoutEffect(() => {
+    if (!hasGameState) return;
+
+    const updateTileSize = () => {
+      const container = gameContainerRef.current;
+      const header = headerRef.current;
+      const hud = hudRef.current;
+      if (!container || !header || !hud) return;
+
+      const containerStyles = window.getComputedStyle(container);
+      const verticalPadding = Number.parseFloat(containerStyles.paddingTop) + Number.parseFloat(containerStyles.paddingBottom);
+      const gap = Number.parseFloat(containerStyles.rowGap || containerStyles.gap) || 0;
+      const availableWidth = container.clientWidth;
+      const occupiedHeight = header.offsetHeight + hud.offsetHeight + (gap * 2) + verticalPadding;
+      const availableHeight = window.innerHeight - occupiedHeight;
+      const frameCells = 17;
+      const nextSize = Math.floor(Math.min(70, availableWidth / frameCells, availableHeight / frameCells));
+
+      setTileSize(Math.max(8, nextSize));
     };
-    window.addEventListener('resize', handleResize);
-    handleResize();
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+
+    const observer = new ResizeObserver(updateTileSize);
+    observer.observe(gameContainerRef.current!);
+    observer.observe(headerRef.current!);
+    observer.observe(hudRef.current!);
+    window.addEventListener('resize', updateTileSize);
+    updateTileSize();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateTileSize);
+    };
+  }, [hasGameState]);
 
   // ──────────────────────────────────────────────────────────────
   // TICKER (for live timer countdown)
@@ -256,16 +291,16 @@ export default function App() {
   // ──────────────────────────────────────────────────────────────
   if (!gameState) {
     return (
-      <div id="game-container" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '100vh', gap: 24, textAlign: 'center' }}>
+      <div id="game-container" className="lobby-layout">
         <div className="ambient-background"><div className="glow-orb orb-a" /><div className="glow-orb orb-b" /></div>
-        <h1 className="glitch-text">HOT POTATO</h1>
-        <p className="subtitle">Only the Bomb Holder can move. Tag to survive.</p>
-        <div className="glass-panel" style={{ padding: 24, display: 'flex', gap: 12, marginTop: 40 }}>
-          <button onClick={createRoom} style={{ padding: '12px 24px', background: 'var(--player-a)', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 900 }}>CREATE ROOM</button>
-          <div style={{ display: 'flex', gap: 8 }}>
+        <h1 className="glitch-text">MIAMI MICE</h1>
+        <p className="subtitle">Guide your mouse to the cheese before time runs out.</p>
+        <div className="glass-panel lobby-panel">
+          <button className="room-button create-button" onClick={createRoom}>CREATE ROOM</button>
+          <div className="join-controls">
             <input type="text" placeholder="ROOM CODE" value={joinCodeInp} onChange={e => setJoinCodeInp(e.target.value.toUpperCase())} maxLength={5}
-              style={{ padding: '12px', background: 'rgba(0,0,0,0.5)', border: '1px solid var(--panel-border)', color: '#fff', borderRadius: 8, width: 120, textTransform: 'uppercase' }} />
-            <button onClick={joinRoom} style={{ padding: '12px 24px', background: 'var(--player-b)', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 900, color: '#fff' }}>JOIN</button>
+              className="room-code-input" />
+            <button className="room-button join-button" onClick={joinRoom}>JOIN</button>
           </div>
         </div>
       </div>
@@ -273,10 +308,10 @@ export default function App() {
   }
 
   const isPlaying = gameState.phase === 'PLAYING';
-  const remainingBomb = Math.max(0, gameState.bomb_deadline_ms - tick);
+  const remainingTime = Math.max(0, gameState.bomb_deadline_ms - tick);
   const remainingCount = Math.max(0, gameState.countdown_deadline_ms - tick);
   const currentDuration = (gameState.timer_duration_s || 20) * 1000;
-  const pct = gameState.phase === 'WAITING' ? 100 : (remainingBomb / currentDuration) * 100;
+  const pct = gameState.phase === 'WAITING' ? 100 : (remainingTime / currentDuration) * 100;
 
   // Use client-predicted positions for the active player, server positions for the opponent
   const displayA = (mySlotDisplay === 'A' && localPos) ? localPos.a : gameState.player_a;
@@ -286,24 +321,24 @@ export default function App() {
     switch (gameState.phase) {
       case 'WAITING': return { text: `ROOM: ${gameState.room_code} — WAITING P2`, color: '#777', bg: 'rgba(0,0,0,0.5)', timerDisplay: 'WAITING' };
       case 'COUNTDOWN': return { text: 'PREPARE', color: '#FFD700', bg: 'rgba(255,215,0,0.15)', timerDisplay: (remainingCount / 1000).toFixed(1) + 's' };
-      case 'PLAYING': return { text: 'RUN!', color: '#00FF7F', bg: 'rgba(0,255,127,0.15)', timerDisplay: (remainingBomb / 1000).toFixed(1) + 's' };
-      case 'ROUND_OVER': return { text: 'ELIMINATED', color: '#FF0055', bg: 'rgba(255,0,85,0.15)', timerDisplay: '0.0s' };
+      case 'PLAYING': return { text: 'FIND THE CHEESE!', color: '#00FF7F', bg: 'rgba(0,255,127,0.15)', timerDisplay: (remainingTime / 1000).toFixed(1) + 's' };
+      case 'ROUND_OVER': return { text: "TIME'S UP", color: '#FF0055', bg: 'rgba(255,0,85,0.15)', timerDisplay: '0.0s' };
       default: return { text: gameState.phase, color: '#fff', bg: '#000', timerDisplay: '' };
     }
   })();
 
-  const dangerTimer = isPlaying && remainingBomb <= 5000;
+  const dangerTimer = isPlaying && remainingTime <= 5000;
 
   return (
     <>
       <div className="ambient-background"><div className="glow-orb orb-a" /><div className="glow-orb orb-b" /></div>
-      <div id="game-container" style={{ '--tile-size': `${tileSize}px` } as React.CSSProperties}>
-        <header>
-          <h1 className="glitch-text">HOT POTATO</h1>
-          <p className="subtitle">Only the Bomb Holder can move. Tag to survive.</p>
+      <div ref={gameContainerRef} id="game-container" className="game-layout" style={{ '--tile-size': `${tileSize}px` } as React.CSSProperties}>
+        <header ref={headerRef}>
+          <h1 className="glitch-text">MIAMI MICE</h1>
+          <p className="subtitle">Race through the maze and reach the cheese.</p>
         </header>
 
-        <div id="hud" className="glass-panel">
+        <div ref={hudRef} id="hud" className="glass-panel">
           <div className={`score-card player-a-theme ${gameState.active_player === 'A' ? 'active-card' : ''}`}>
             <div className="controls-label">PLAYER 1</div>
             <div className="player-name">{mySlotDisplay === 'A' ? 'YOU (WASD)' : 'PLAYER 1'}</div>
@@ -312,14 +347,14 @@ export default function App() {
 
           <div className="center-hud">
             <div id="phase-badge" style={{ color: hudConfig.color, background: hudConfig.bg }}>{hudConfig.text}</div>
-            <div id="timer-display" style={{ color: dangerTimer ? '#FF0055' : (gameState.phase === 'COUNTDOWN' || gameState.phase === 'ROUND_OVER' ? 'inherit' : 'var(--bomb-color)') }}>
+            <div id="timer-display" style={{ color: dangerTimer ? '#FF0055' : (gameState.phase === 'COUNTDOWN' || gameState.phase === 'ROUND_OVER' ? 'inherit' : 'var(--timer-color)') }}>
               {hudConfig.timerDisplay}
             </div>
             <div className="progress-track" style={{ opacity: gameState.phase === 'WAITING' ? 0.3 : 1 }}>
               <div id="timer-bar" style={{
                 width: gameState.phase === 'COUNTDOWN' ? '100%' : gameState.phase === 'ROUND_OVER' ? '0%' : `${pct}%`,
-                background: dangerTimer ? '#FF0055' : (gameState.phase === 'COUNTDOWN' ? 'var(--text-muted)' : 'var(--bomb-color)'),
-                boxShadow: dangerTimer ? '0 0 15px #FF0055' : (gameState.phase === 'COUNTDOWN' ? 'none' : '0 0 10px var(--bomb-color)')
+                background: dangerTimer ? '#FF0055' : (gameState.phase === 'COUNTDOWN' ? 'var(--text-muted)' : 'var(--timer-color)'),
+                boxShadow: dangerTimer ? '0 0 15px #FF0055' : (gameState.phase === 'COUNTDOWN' ? 'none' : '0 0 10px var(--timer-color)')
               }} />
             </div>
           </div>
@@ -332,36 +367,41 @@ export default function App() {
         </div>
 
         {gameState.maze && gameState.maze.length > 0 && (
-          <div className="board-wrapper glass-panel">
+          <div className="board-wrapper">
+            <div className="maze-frame">
+              <MazeBoundary />
             <div id="game-board">
               {gameState.maze.map((row: number[], y: number) =>
                 row.map((cell: number, x: number) => (
                   cell === 1
                     ? <WallTile key={`${x}-${y}`} x={x} y={y} maze={gameState.maze} />
-                    : <div key={`${x}-${y}`} className="tile-floor" style={{ gridColumn: x + 1, gridRow: y + 1 }} />
+                    : <div key={`${x}-${y}`} className={`tile-floor floor-variant-${floorVariants[y]?.[x] ?? 0}`} style={{ gridColumn: x + 1, gridRow: y + 1 }} />
                 ))
               )}
 
               <div id="player-a"
-                className={`player ${gameState.bomb_holder === 'A' ? 'bomb' : ''} ${gameState.active_player === 'A' && isPlaying ? 'active' : ''}`}
+                className={`player ${gameState.active_player === 'A' ? 'mouse' : 'cheese-target'}`}
+                aria-label={gameState.active_player === 'A' ? 'Player 1 mouse' : 'Player 1 cheese target'}
                 style={{ transform: `translate(${displayA.x * tileSize}px, ${displayA.y * tileSize}px)`, transition: isPlaying ? 'transform 0.07s linear' : 'none' }}>
-                A
+                {gameState.active_player === 'A' ? 'A' : ''}
               </div>
 
               <div id="player-b"
-                className={`player ${gameState.bomb_holder === 'B' ? 'bomb' : ''} ${gameState.active_player === 'B' && isPlaying ? 'active' : ''}`}
+                className={`player ${gameState.active_player === 'B' ? 'mouse' : 'cheese-target'}`}
+                aria-label={gameState.active_player === 'B' ? 'Player 2 mouse' : 'Player 2 cheese target'}
                 style={{ transform: `translate(${displayB.x * tileSize}px, ${displayB.y * tileSize}px)`, transition: isPlaying ? 'transform 0.07s linear' : 'none' }}>
-                B
+                {gameState.active_player === 'B' ? 'B' : ''}
+              </div>
+
+              <div id="game-overlay" className={gameState.phase === 'ROUND_OVER' ? '' : 'hidden'}>
+                <h2 id="overlay-title">CHEESE GOT AWAY!</h2>
+                <p id="overlay-subtitle">
+                  <span style={{ color: gameState.bomb_holder === 'A' ? 'var(--player-a)' : 'var(--player-b)' }}>
+                    {gameState.bomb_holder === 'A' ? 'PLAYER 1' : 'PLAYER 2'}
+                  </span> ran out of time.
+                </p>
               </div>
             </div>
-
-            <div id="game-overlay" className={gameState.phase === 'ROUND_OVER' ? '' : 'hidden'}>
-              <h2 id="overlay-title">BOOM!</h2>
-              <p id="overlay-subtitle">
-                <span style={{ color: gameState.bomb_holder === 'A' ? 'var(--player-a)' : 'var(--player-b)' }}>
-                  {gameState.bomb_holder === 'A' ? 'PLAYER 1' : 'PLAYER 2'}
-                </span> was eliminated this round.
-              </p>
             </div>
           </div>
         )}

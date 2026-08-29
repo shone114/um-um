@@ -5,7 +5,6 @@ export interface WallAssetResult {
 
 const WALL_IMG = '/assets/maze/wall.png';
 const WALL_END_IMG = '/assets/maze/wall_end.png';
-const WALL_CORNER_IMG = '/assets/maze/wall_corner.png';
 
 /**
  * Resolves which wall asset to render for the cell at (x, y) and applies standard CSS 
@@ -14,7 +13,7 @@ const WALL_CORNER_IMG = '/assets/maze/wall_corner.png';
  * Assumptions for base assets (0deg rotation):
  * - wall_end.png: left-side end cap (connects to the RIGHT)
  * - wall.png: horizontal straight (connects LEFT and RIGHT)
- * - wall_corner.png: top-left corner (connects RIGHT and BOTTOM)
+ * - wall.png: also acts as the safe fallback for corners and junctions.
  */
 export function resolveWallAsset(x: number, y: number, maze: number[][]): WallAssetResult {
   const H = maze.length;
@@ -41,10 +40,10 @@ export function resolveWallAsset(x: number, y: number, maze: number[][]): WallAs
   // Corridors & Corners
   if (neighborsCount === 2) {
     // Corners
-    if (right && bottom) return { src: WALL_CORNER_IMG, transform: 'rotate(0deg)' };
-    if (bottom && left) return { src: WALL_CORNER_IMG, transform: 'rotate(90deg)' };
-    if (left && top) return { src: WALL_CORNER_IMG, transform: 'rotate(180deg)' };
-    if (top && right) return { src: WALL_CORNER_IMG, transform: 'rotate(270deg)' };
+    if (right && bottom) return { src: WALL_IMG, transform: 'rotate(0deg)' };
+    if (bottom && left) return { src: WALL_IMG, transform: 'rotate(90deg)' };
+    if (left && top) return { src: WALL_IMG, transform: 'rotate(180deg)' };
+    if (top && right) return { src: WALL_IMG, transform: 'rotate(270deg)' };
     
     // Straights
     if (left && right) return { src: WALL_IMG, transform: 'rotate(0deg)' };
